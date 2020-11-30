@@ -1,0 +1,590 @@
+---
+title: "Preprocessing of N size x laterality pilot data"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The markdown pulls pilot data into R and turns it to make something usable. The pilot study in question looks at orthographic neighbourhood effects across visual fields and examines how the strength of lateralisation on a dichtoic listening task influences the magnitude of the effect. As the study will aim to recruit left-handers we already know that the pattern of effects may not pan out the same as when using right-handers as done in previous studies. 
+
+In the pilot study we collected the following measures:
+
+1) Basic demographic information
+2) Edinburgh handedness inventory
+3) LexTALE
+4) Dichotic listening
+5) visual half field task (with neighbourhood size manipulation)
+
+We process each measure in stages adding to a larger data frame. 
+
+## Demographics
+
+First we read in the data. Our strategy is to select the relevant rows here. 
+
+```{r demo}
+demo_dat <- read.csv('./data/data_exp_33901-v4_questionnaire-rr35.csv',stringsAsFactors = F, na.strings = c("NA", ""))
+# relabel 
+demo_dat$ID <- demo_dat$Participant.Private.ID
+  demo_dat$ID <- as.factor(demo_dat$ID)
+# count and print subjects
+nsub <-length(levels(demo_dat$ID))
+  print(paste0("subjects: ", nsub))
+# create data frame
+sum.file <- data.frame(matrix(ncol = 4, nrow = nsub))
+  colnames(sum.file) <- c("ID", "age", "gender", "handedness")
+# start row counter
+myrow <- 0 
+# foor loop to extract
+for (i in 1:nsub) { # loop through subjects
+  subname <- levels(demo_dat$ID)[i] # find ID subject
+  myrows <- which(demo_dat$ID==subname) # select rows for this subject
+  tmp <- data.frame(demo_dat[myrows,]) # write subset of data
+
+  myrow <- i # write to new row
+
+  sum.file$ID[myrow] <- subname
+  sum.file$age[myrow] <- as.numeric( tmp[tmp$Question.Key == "Age",]$Response)
+  sum.file$gender[myrow] <- tmp[tmp$Question.Key == "Gender",]$Response
+  sum.file$handedness[myrow] <- tmp[tmp$Question.Key == "categorical_hand",]$Response
+}
+```
+
+Now cam see that we have `r nsub` participants in the current study. They have a mean age of `r round(mean(sum.file$age, na.rm= TRUE), 1)` years (*SD*= `r round(mean(sum.file$age, na.rm= TRUE), 2)` years). While we looked to recruit left-handers, `r nrow(subset(sum.file, handedness== "Right"))` right-handers seem to have been included. **We will add in a step in Gorilla to remove these participants**. 
+
+## Edinburgh handedness inventory
+
+Now we add the EHI. Here we score and plot the Edinburgh handedness inventory (Oldfield, 1971) in its short form. We write this to the plot directory.
+
+```{r EHI, warning=FALSE}
+# package
+library(ggplot2)
+# read
+EHI <- read.csv("./data/data_exp_33901-v4_questionnaire-nihy.csv",stringsAsFactors = F, na.strings = c("NA", ""))
+# select only responses
+EHI <- EHI[EHI$Question.Key == "response-2-quantised" | EHI$Question.Key == "response-3-quantised" | 
+           EHI$Question.Key == "response-4-quantised" | EHI$Question.Key == "response-5-quantised" |
+           EHI$Question.Key == "response-6-quantised" | EHI$Question.Key == "response-7-quantised" | 
+           EHI$Question.Key == "response-8-quantised" | EHI$Question.Key == "response-9-quantised" |
+           EHI$Question.Key == "response-10-quantised" | EHI$Question.Key == "response-11-quantised" | 
+           EHI$Question.Key == "response-12-quantised" | EHI$Question.Key == "response-13-quantised" |
+           EHI$Question.Key == "response-14-quantised" | EHI$Question.Key == "response-15-quantised" | 
+           EHI$Question.Key == "response-16-quantised" | EHI$Question.Key == "response-17-quantised" |
+           EHI$Question.Key == "response-18-quantised" | EHI$Question.Key == "response-19-quantised" | 
+           EHI$Question.Key == "response-20-quantised",]
+# recode variables
+EHI$ID <- EHI$Participant.Private.ID
+  EHI$ID <- as.factor(EHI$ID)
+# reduce data
+# new data
+meaningful <- c("ID", "Question Key", "Response") # select wanted columns
+  c<-which(names(EHI) %in% meaningful) #find colnumbers of unwanted
+EHI <-EHI[,c] #remove unwanted columns
+EHI <- na.omit(EHI) # remove NAs
+# score responses according to the original scoring method in Oldfield (1971)
+EHI$right_hand <- 0
+EHI$left_hand <- 0
+for (r in 1:nrow(EHI)) {
+  if(EHI$Response[r] == 1){
+    EHI$right_hand[r]= 2 
+  } else {
+    if(EHI$Response[r] == 2){
+      EHI$right_hand[r]= 1
+    } else {
+      if(EHI$Response[r] == 4){
+        EHI$left_hand[r]= 1
+      } else {
+        if(EHI$Response[r] == 5){
+          EHI$left_hand[r]= 2 
+        } else {
+          (EHI$right_hand[r]= 1) & (EHI$left_hand[r]= 1)
+        }
+      }
+    }
+  }
+}
+# re-reduce data
+# new data
+meaningful <- c("ID", "right_hand", "left_hand") # select wanted columns
+c<-which(names(EHI) %in% meaningful) #find colnumbers of unwanted
+EHI <-EHI[,c] #remove unwanted columns
+EHI <- na.omit(EHI) # remove NAs
+# find sum for left and right for each participant 
+# create hand data 
+nsub <-length(levels(EHI$ID))
+EHI2 <- data.frame(matrix(ncol = 3, nrow = nsub))
+  colnames(EHI2) <- c("ID", "right_hand", "left_hand")
+for (i in 1:nsub) { # loop through subjects
+  myrow <- i
+  subname <- levels(EHI$ID)[i] # find ID subject
+  myrows <- which(EHI$ID==subname) # select rows for this subject
+  tmp <- data.frame(EHI[myrows,])
+  
+    EHI2$ID[myrow] <- subname # add row for subject
+    EHI2$right_hand[myrow] <- sum(tmp$right_hand) # sum for R hand
+    EHI2$left_hand[myrow] <- sum(tmp$left_hand) # sum for L hand
+  }
+EHI2$index_EHI <- 100*(EHI2$right_hand-EHI2$left_hand)/(EHI2$right_hand+EHI2$left_hand)
+# now create a data frame only for index 
+# merge with sum.file
+sum.file$index_EHI <- NA #initialise
+for (i in 1:nrow(sum.file)){
+  thissub <- sum.file$ID[i]
+    w<-which(EHI2$ID==thissub)
+  sum.file$index_EHI[i] <- EHI2$index_EHI[w]
+}
+#now plot EHI in relation to handedness: negative value indicates left handedness
+x<-ggplot(sum.file, aes(x=index_EHI, y=ID, fill=ID)) +
+  geom_dotplot(binaxis='y', stackdir='center') + xlim(-100, 100) +
+  geom_vline(xintercept = 0, linetype="dashed", color = "black", size=1.5) +
+  ggtitle("Handedness index on the EHI")
+x + theme_bw() + theme(legend.position = "none") + theme(axis.text.y = element_blank()) 
+# save plot
+ggsave("./plots/EHI.png", height = 4, width= 4)
+# recode handedness to be in line with EHI
+sum.file$hand2 <- ifelse(sum.file$index_EHI < 0, "Left", ifelse(sum.file$index_EHI > 0, "Right", "No preference"))
+# odd cases
+hand.dif <- ifelse(sum.file$handedness == sum.file$hand2, 0, 1)
+```
+
+Now we have processed this, we can see that there is `r sum(hand.dif)` participant(s) who reported being left-handed but actually showed an EHI score indicating left handedness. We code recode this participant's handedness using the variable *hand2*. We need to remember to remove the right-hander before analysis.
+
+# LexTALE
+
+Like with the EHI, we process the LexTALE and add it to sum.file.
+
+```{r lexTALE}
+library(dplyr)
+# read data
+lexTALE <- read.csv("./data/data_exp_33901-v4_task-w9kb.csv",stringsAsFactors = F, na.strings = c("NA", ""))
+# filter
+lexTALE <- lexTALE[lexTALE$Attempt == 1,]
+lexTALE <- lexTALE[lexTALE$display == "Task",]
+# rename variables
+lexTALE$ID <- lexTALE$Participant.Private.ID
+lexTALE$accuracy <- lexTALE$Correct
+lexTALE$condition <- lexTALE$ANSWER
+# code as factors
+lexTALE$ID <- as.factor(lexTALE$ID)
+lexTALE$condition <- as.factor(lexTALE$condition)
+  levels(lexTALE$condition) <- c("non-word", "word")
+# create data frame
+lexTale_score <- data.frame(matrix(ncol = 4, nrow = nsub))
+  colnames(lexTale_score) <- c("ID", "Word", "nonWord", "lexTALE")
+# loop through
+for (i in 1:nsub) { # loop through IDs
+  subname <- levels(lexTALE$ID)[i] # find ID subject
+  myrows <- which(lexTALE$ID==subname) # select rows for this subject
+  tmp <- data.frame(lexTALE[myrows,])
+
+  myrow <- i
+
+  lexTale_score$ID[myrow] <- subname
+  lexTale_score$Word[myrow] <- sum(tmp[tmp$condition == "word",]$accuracy)
+  lexTale_score$nonWord[myrow] <- sum(tmp[tmp$condition == "non-word",]$accuracy)
+  lexTale_score$lexTALE[myrow] <- ((sum(tmp[tmp$condition == "word",]$accuracy)/40*100) + (sum(tmp[tmp$condition == "non-word",]$accuracy)/20*100)) / 2
+}
+# plot
+x<-ggplot(lexTale_score, aes(x=lexTALE, y=ID, fill=ID)) +
+  geom_dotplot(binaxis='y', stackdir='center') + xlim(0, 100) +
+  ggtitle("LexTALE score") + geom_vline(xintercept = 80, linetype="dashed", color = "black", size=1.5)
+x + theme_bw() + theme(legend.position = "none") + theme(axis.text.y = element_blank()) 
+# save plot
+ggsave("./plots/LexTALE.png", height = 4, width= 4)
+# now create a data frame only for index 
+lexTALE <- dplyr::select(lexTale_score, "ID", "lexTALE")
+# now merge with sum.file
+sum.file <- merge(sum.file, lexTALE, by= "ID",all=TRUE)
+# out
+paste0("No. of participants below LexTALE cuttoff: ", sum(sum.file$lexTALE < 80))
+# mark those who ID don't pass the LexTALE
+sum.file <- sum.file %>% mutate(lexOut= if_else(lexTALE < 80, "remove", "keep"))
+```
+
+We can see that there is `r nrow(subset(sum.file, lexOut=="remove"))` participant(s). We don't exclude this participant here but keep them in until later when we are analysing data.
+
+# Dichotic listening
+
+We administered three blocks of the dichotic listening. We combine the data here before processing and adding the scores for the left and right ear and the LI onto sum.file. As there is a lot to do, we'll break this down into smaller steps.
+
+First, we read in and combine the data files. We also relabel variables here.
+
+```{r DLread}
+# read gorilla files
+DL1 <- read.csv("./data/data_exp_33901-v4_task-jnx7.csv", na.strings = c("NA", ""))
+DL2 <- read.csv("./data/data_exp_33901-v4_task-ucpb.csv", na.strings = c("NA", ""))
+DL3 <- read.csv("./data/data_exp_33901-v4_task-b4y1.csv", na.strings = c("NA", ""))
+DL4 <- read.csv("./data/data_exp_33901-v4_task-p5hv.csv", na.strings = c("NA", ""))
+DL5 <- read.csv("./data/data_exp_33901-v4_task-2mjp.csv", na.strings = c("NA", ""))
+DL6 <- read.csv("./data/data_exp_33901-v4_task-evxo.csv", na.strings = c("NA", ""))
+# combine
+DL.dat <- rbind(DL1, DL2, DL3, DL4, DL5, DL6)
+# write as factors
+DL.dat$ID <- as.factor(DL.dat$Participant.Private.ID)
+DL.dat$RT <- as.numeric(as.character(DL.dat$Reaction.Time))
+```
+
+Next we prepare the data files. This includes selecting the relevant variables and then writing whether trials are correct. 
+
+```{r DL.prep}
+# lowercase for responses
+DL.dat$left_channel <- tolower(DL.dat$left_channel)
+DL.dat$right_channel <- tolower(DL.dat$right_channel)
+# make meaningful stimuli name
+DL.dat$stimuli <- paste0(DL.dat$left_channel, "-", DL.dat$right_channel)
+# get right trials
+DL.dat <- DL.dat[DL.dat$display== "e_task",]
+# Let's remove the timestamp for audio
+DL.dat <- DL.dat[DL.dat$Response != "AUDIO STARTED",]
+# select columns
+DL.all <- dplyr::select(DL.dat, "ID", "stimuli", "Response", "RT", "left_channel", "right_channel")
+# let's start coding in the responses
+DL.all$Correct <- 0 #default is error
+w<-union(which(DL.all$Response==DL.all$left_channel),which(DL.all$Response==DL.all$right_channel))
+DL.all$Correct[w] <-1
+# clear NA
+DL.all <- na.omit(DL.all)
+# let's quickly print number of errors (0) and correct responses (1)
+print(table(DL.all$Correct))
+# now seperate the data frames into trials with the same and different sounds in each ear
+DL.same <- DL.all[DL.all$left_channel == DL.all$right_channel,] # create data frame for trials with both ears same
+DL.dif <- DL.all[DL.all$left_channel != DL.all$right_channel,] # remove items where same expression in both hemifaces
+```
+
+Now, we judge participants' ability to correctly identify sounds using the "dichotic_same" dataframe. We store this accuracy as *sound.recog*. We then create a filter variable (*exDL*) which can be used to filter those out with less than 75% accuracy. 
+
+We can also remove those with low accuracy on dichotic trials, that is those who don't make an accurate response to either ear on a certain percentage of trials, i.e. 50%. We store accuracy as *DL.acc* and write the removal to *exDL*. 
+
+```{r DL.ability}
+# calculate participants average
+sound_mean <- aggregate(FUN= mean, data= DL.same, Correct~ ID)
+dichotic_mean <- aggregate(FUN= mean, data= DL.dif, Correct~ ID)
+# write to summary
+sum.file <- merge(sum.file, sound_mean, by= "ID",all=TRUE)
+sum.file <- merge(sum.file, dichotic_mean, by= "ID",all=TRUE)
+# change columns name
+mycol <- length(colnames(sum.file))
+  colnames(sum.file)[c(mycol-1, mycol)]<-c('sound.recog', "DL.acc")
+# create removal
+w<-which(sum.file$sound.recog < .75 | sum.file$DL.acc < .50)
+sum.file$exDL<- 0
+sum.file$exDL[w]<-1
+```
+
+In this section, we mark whether the correct answer was given to the left or right ear. We also remove long trials as there may have been cross talk. We select something arbitrary (10 ms) as we really don't care about RT for the dichotic listening. 
+
+```{r DL.cor.ear}
+# this will mark the side responded to.
+DL.dif <- 
+  DL.dif %>% 
+  mutate(side= ifelse(as.character(Response) == as.character(left_channel) & Correct == 1, "Left",
+                       ifelse(as.character(Response) == as.character(right_channel) & Correct == 1, "Right", NA)))
+# code side as factor
+DL.dif$side <- as.factor(DL.dif$side)
+# We want to remove the trials where there is a long reaction time. 
+DL.dif <- subset(DL.dif, RT < 10000)
+```
+
+Now that we have data that is fully prepared we can make a data frame of useful data. We can append the counts straight into the sum.file.
+
+```{r DL.counts}
+nsub<-length(unique(DL.dif$ID))
+# create compact data frame ; one row for each subject, subjects stacked, L above R
+temp_dat <- data.frame(matrix(ncol = 4, nrow = nsub*2))
+  colnames(temp_dat) <- c("ID", "side", "count", "accuracy")
+# lift sides
+latlist <- c("Left","Right")
+# create row counter
+myrow <- 0 # start row counter
+# for loop start
+# let's first go through subjects
+for (i in 1:nsub) { 
+  subname <- levels(DL.dif$ID)[i] # find ID subject
+  myrows <- which(DL.dif$ID==subname) # select rows for this subject
+  latcol <- which(colnames(DL.dif) == "side")
+  tmp <- data.frame(DL.dif[myrows,]) #all trials from this subject
+  # make row for means for each side for this subject
+  for (j in 1:2) { 
+    myrow <- myrow+1
+    w<- which(tmp[,latcol]== latlist[j]) # select side
+    tmp1 <- tmp[w,] # reduce
+    # write to data frame
+    temp_dat$ID[myrow] <- subname # add row for ID
+    temp_dat$side[myrow] <- latlist[j] # add row for side
+    temp_dat$count[myrow] <- sum(tmp1$Correct,na.rm=TRUE) # add row for N accurate response
+    temp_dat$accuracy[myrow] <- 100*mean(tmp1$Correct,na.rm=TRUE) # add row for %accurate response
+  }
+}
+# select counts
+DL.Left<-dplyr::select(filter(temp_dat,side=='Left'),ID,count)
+DL.Right<-dplyr::select(filter(temp_dat,side=='Right'),ID,count)
+# Append
+sum.file <- merge(sum.file,DL.Left,by="ID",all=TRUE)
+sum.file <- merge(sum.file,DL.Right,by="ID",all=TRUE)
+myn <-ncol(sum.file)
+  colnames(sum.file)[(myn-1):myn] <- c('DL.Left', "DL.Right")
+```
+
+Now that we have the data formatted and the counts generated we can look at whether or not there is a right ear advantage at the population level. 
+
+```{r plot.DL.count}
+ear <- ggplot(temp_dat, aes(x=side, y=count, fill=side)) +
+  geom_dotplot(binaxis='y', stackdir='center') +
+  theme_bw() + theme(legend.position = "none") + 
+  ggtitle("Count of correct responses in each ear") + 
+  xlab(" ")
+# save plot
+ggsave("./plots/ear_plot.png", height = 4, width= 4)
+```
+
+Based on the pilot data there doesn't really look like much of a clear ear advantage. We know this task is reliable so it is really looking right lateralised for a number of participants. To verify this we can calculate a laterality indiex and then apply some cutoff for categorical laterality.
+
+```{r DL.LI}
+# numerical value
+sum.file$DL.LI <- 100*((sum.file$DL.Right-sum.file$DL.Left)/(sum.file$DL.Right+sum.file$DL.Left))
+# categorical value
+sum.file$DL.Lat <- ifelse(sum.file$DL.LI < 0, "Right", ifelse(sum.file$DL.LI > 0, "Left", "Bilateral"))
+```
+
+Now let's show these visually. 
+
+```{r DL.LI.plot}
+# plot
+x<-ggplot(sum.file, aes(x=DL.LI, y=ID, fill=ID)) +
+  geom_dotplot(binaxis='y', stackdir='center') + xlim(-100, 100) +
+  ggtitle("Dichotic listening laterality indicies") + geom_vline(xintercept = 0, linetype="dashed", color = "black", size=1.5)
+x + theme_bw() + theme(legend.position = "none") + theme(axis.text.y = element_blank()) 
+# save plot
+ggsave("./plots/DL_LIs.png", height = 4, width= 4)
+```
+
+As we can see, there is pretty good spread of the LIs from the dichotic listening, confirming our that our decision to use left-handers would result in a wider distribution. From the figure it is clear that there are `r nrow(subset(sum.file, DL.Lat=="Left"))` participants who show left cerebral dominance, `r nrow(subset(sum.file, DL.Lat=="Right"))` who show right dominance, and `r nrow(subset(sum.file, DL.Lat=="Bilat"))` who show bilateral dominance. 
+
+## N size visual half-field paradigm
+
+Now let's process the visual half-field task. In this task participants saw high- and low-N words in both the left- and right-visual field. From this we want to be able to generate a long data frame which can be used for linear-mixed effects models as well as adding to the *sum.file* data frame. 
+
+Let's begin by reading in the various counter balance lists. 
+
+```{r N.read}
+# install tidyverse
+library(tidyverse)
+# read data
+list1 <- read.csv("./data/data_exp_33901-v4_task-wwle.csv", na.strings = c("NA", ""))
+list2 <- read.csv("./data/data_exp_33901-v4_task-tbn2.csv", na.strings = c("NA", ""))
+list3 <- read.csv("./data/data_exp_33901-v4_task-o2pi.csv", na.strings = c("NA", ""))
+list4 <- read.csv("./data/data_exp_33901-v4_task-i2ev.csv", na.strings = c("NA", ""))
+# combine
+dat <- rbind(list1, list2, list3, list4)
+```
+
+Now that the data is read in, lets filter it down to something usable. To do this we need to identify the zone.type associated with the response.  In the data, the zone type *response_keyboard_single* is recording the button press, so we use this to pick out button presses. 
+
+Here, by using the *display* column we can also remove practice trials and pick out the *Task* display.
+
+```{r N.filtering}
+# first, let's use the filter function to trim this
+dat <- dat %>% 
+  filter(Zone.Type == "response_keyboard_single" & # choose the zone that gives the repsonse
+         display == "task") # choose the screen that is the task
+```
+
+Gorilla gives us a lot more information than we need. Let's select the variables that we actually want for further analysis
+
+```{r N.select}
+# first, let's print the names of the rows so that we can see what we want
+names(dat)
+# now, select what we want
+trial_data <- dat %>%
+  select(Participant.Private.ID, ANSWER, Correct, Reaction.Time, N, target.VF, word)
+# we can also rename these to make things a little easier (so that we don't have to type long names)
+trial_data <- trial_data %>% 
+  rename(ID = Participant.Private.ID,
+         answer = ANSWER,
+         acc = Correct,
+         RT = Reaction.Time,
+         item = word,
+         VF = target.VF)
+# again, check to see if it makes sense
+head(trial_data)
+```
+
+This looks good. Now we have the data prepare let's approach outliers. We can adjust the cutoff but let's have 250 ms and 1500 ms as our cuttoffs.
+
+- first, remove inaccurate trials
+
+- remove trials where RT was less than 250 and greater than 1200. 
+
+- Due to potential issues with buffering and poor internet connections when completing the task, we will use the criteria outlined by Hoaglin-Iglewicz to exclude outliers in the data for reaction time for each individual subject after removing reaction times less than 250 ms and longer than 1200 ms. Our cut-off criterion will be set to 1.65 instead of the typical 2.2. This is because we expect to obtain asymmetric distributions for reaction time, since reaction time is always non-negative, and so most outliers will be in one tail of the distribution. 
+
+So that we can calculate accuracy correctly later on, make sure to code the outliers as NA. 
+
+```{r outliers}
+trial_data$ID <- as.factor(trial_data$ID)
+trial_data$VF <- as.factor(trial_data$VF)
+trial_data$N <- as.factor(trial_data$N)
+trial_data$item <- as.factor(trial_data$item)
+trial_data$answer <- as.factor(trial_data$answer)
+trial_data$RT <- as.numeric(trial_data$RT)
+# plot density of RTs to see where we should cut the tail
+ggplot(subset(trial_data, RT < 5000), aes(x=RT)) + geom_density() + theme_bw() + ggtitle("Distribution of RTs on VHF task")
+# save plot
+ggsave("./plots/VHF_RTs.png", height = 4, width= 4)
+# remove non-words
+trial_data <- trial_data[trial_data$answer== "word",]
+# first, let's use mutate to create some new variables. If else does this conditionally
+trial_data <- trial_data %>% 
+  mutate(accRT = ifelse(acc == 1, RT, NA), # create RT for accurate response
+         accRT = ifelse(accRT > 200 & accRT < 2500, accRT, NA)) # now remove short and long RT
+# Now we will apply the Hoaglin and Iglewicz procedure [YOU MOST LIKLEY CAN IGNORE THIS]
+trial_data <- 
+  trial_data %>% 
+  group_by(ID) %>%
+  mutate(
+    # Identify 25th and 75th quartiles of trial_data, and the difference between them
+    lower_quartile <- quantile(trial_data$accRT, probs=0.25, na.rm="TRUE"),
+    upper_quartile <- quantile(trial_data$accRT, probs=0.75, na.rm="TRUE"),
+    quartile_diff <- upper_quartile - lower_quartile,
+    # Outliers are defined as being below or above 2.2 times the quartile difference
+    lower_limit <- lower_quartile - 1.65*quartile_diff,
+    upper_limit <- upper_quartile + 1.65*quartile_diff,
+    # create variable
+    accRT= ifelse(accRT >= upper_limit | accRT <= lower_limit, NA, accRT))
+
+# now neaten up after HI outlier removal
+trial_data <- trial_data[,1:8]
+```
+
+### Long data
+
+Now we have some of the data prepared, we can write a long version which includes each item and subject. We filter *sum.file* for the relevant columns. 
+
+```{r long.dat}
+# select the relevant columns from sum.file
+to.append <- dplyr::select(sum.file, ID, hand2, lexOut, exDL, DL.LI, DL.Lat)
+  to.append$ID <- as.factor(to.append$ID)
+# merge
+trial_data <- merge(to.append, trial_data, by= "ID")
+# write data
+write.csv(trial_data, "./output/Nsize_long.csv")
+```
+
+### Aggregate data
+
+We use group_by() to specify that level of specificity that we want the data. Using ID will give a summary of accuracy and RT for subjects only. To get more we need to specify the variables that we manipulated.
+
+```{r summary}
+participant_data <- trial_data %>% 
+  group_by(ID, N, VF) %>% 
+  summarise(meanAcc = mean(acc), 
+            meanRT = mean(accRT, na.rm = TRUE))
+# let write this long format aggregate data also
+write.csv(participant_data, "./output/long_format_aggregate.csv")
+```
+
+Let's have a look now at the accuracy and see how participants did. Based on this we can pre-register how to remove Ps.
+
+```{r acc}
+# across fields
+means <- aggregate(FUN= mean, data= participant_data, meanAcc~ ID + VF)
+x<-ggplot(means, aes(x=meanAcc, y=ID, fill=ID)) +
+  geom_dotplot(binaxis='y', stackdir='center') + xlim(0,1) +
+  ggtitle("Accuracy in the left and right visual field") + geom_vline(xintercept = .50, linetype="dashed", color = "black", size=1.5)
+x + theme_bw() + theme(legend.position = "none") + theme(axis.text.y = element_blank()) + facet_wrap(~VF)
+# save plot
+ggsave("./plots/accuracy_per_VF.png", height = 4, width= 4)
+# averaged
+means2 <- aggregate(FUN= mean, data= participant_data, meanAcc~ ID)
+x<-ggplot(means2, aes(x=meanAcc, y=ID, fill=ID)) +
+  geom_dotplot(binaxis='y', stackdir='center') + xlim(0,1) +
+  ggtitle("Accuracy averaged across visual fields") + geom_vline(xintercept = .50, linetype="dashed", color = "black", size=1.5)
+x + theme_bw() + theme(legend.position = "none") + theme(axis.text.y = element_blank()) 
+# save plot
+ggsave("./plots/Accuracy_summed_across_VF.png", height = 4, width= 4)
+```
+
+Accuracy is generally quite mixed. In one visual field participants seem quite good, but poor in their other. Many score less than 50% in one or the other. When we aggregate across visual fields, participants seem to do a little better. One criteria for pre-registration may be that we exclude those with less than 50% overall. 
+
+We can finish the processing by adding condition means to the sum.file data and then creating the N size effect for each visual field.
+
+```{r add.means}
+# select each
+LVF.HN<-subset(participant_data, (VF=='L' & N== 'high N '))
+  LVF.HN <- dplyr::select(LVF.HN, ID, meanAcc, meanRT)
+  LVF.HN <- LVF.HN[,-(1)] 
+LVF.LN<-subset(participant_data, (VF=='L' & N== 'low N'))
+  LVF.LN <- dplyr::select(LVF.LN, ID, meanAcc, meanRT)
+  LVF.LN <- LVF.LN[,-(1)] 
+RVF.HN<-subset(participant_data, (VF=='R' & N== 'high N '))
+  RVF.HN <- dplyr::select(RVF.HN, ID, meanAcc, meanRT)
+  RVF.HN <- RVF.HN[,-(1)] 
+RVF.LN<-subset(participant_data, (VF=='R' & N== 'low N'))
+  RVF.LN <- dplyr::select(RVF.LN, ID, meanAcc, meanRT)
+  RVF.LN <- RVF.LN[,-(1)] 
+# Append
+sum.file <- merge(sum.file,LVF.HN,by="ID",all=TRUE)
+  myn <-ncol(sum.file)
+    colnames(sum.file)[(myn-1):myn] <- c("LVF.HighN.Acc", "LVF.HighN.RT")
+sum.file <- merge(sum.file,LVF.LN,by="ID",all=TRUE)
+  myn <-ncol(sum.file)
+    colnames(sum.file)[(myn-1):myn] <- c("LVF.LowN.Acc", "LVF.LowN.RT")
+sum.file <- merge(sum.file,RVF.HN,by="ID",all=TRUE)
+  myn <-ncol(sum.file)
+    colnames(sum.file)[(myn-1):myn] <- c("RVF.HighN.Acc", "RVF.HighN.RT")
+sum.file <- merge(sum.file,RVF.LN,by="ID",all=TRUE)
+  myn <-ncol(sum.file)
+    colnames(sum.file)[(myn-1):myn] <- c("RVF.LowN.Acc", "RVF.LowN.RT")
+# CALCULATE N EFFECT ACROSS HEMISPHERE
+sum.file$LVF.N <- sum.file$LVF.HighN.RT - sum.file$LVF.LowN.RT
+sum.file$RVF.N <- sum.file$RVF.HighN.RT - sum.file$RVF.LowN.RT
+# write the wide format data
+write.csv(sum.file, "./output/wide_format_N.csv")
+```
+
+## Plot condition means
+
+This plots the data so that we get a feel for it.
+
+```{r visual}
+# Because we have aggregate data at the subject level, we actually need to aggregate this one step further for the plot
+agg_data <- trial_data %>% 
+  group_by(N, VF, DL.Lat) %>% 
+  summarise(meanAcc = mean(acc), 
+            meanRT = mean(accRT, na.rm = TRUE))
+# relable for interpretation
+agg_data <- agg_data %>% mutate(DL.Lat= ifelse(DL.Lat== "Left", "Left lateralised", "Right lateralised"))
+# plot RT
+p<-ggplot(agg_data, aes(x=N, y=meanRT, group=VF)) +
+        geom_line(aes(color=VF))+
+        geom_point(aes(color=VF)) + 
+        ggtitle("RT for correct trials") +
+        scale_y_log10()
+p+scale_color_brewer(palette="Dark2")+theme_bw(18)+facet_wrap(~DL.Lat)
+# save plot
+ggsave("./plots/Nsize_RT_plot.png", height = 7, width= 7)
+# plot acc
+q<-ggplot(agg_data, aes(x=N, y=meanAcc, group=VF)) +
+        geom_line(aes(color=VF))+
+        geom_point(aes(color=VF)) + 
+        ggtitle("Accuracy for correct trials")
+q+scale_color_brewer(palette="Dark2")+theme_bw(18)+facet_wrap(~DL.Lat)
+# save plot
+ggsave("./plots/Nsize_Acc_plot.png", height = 7, width= 7)
+```
+
+## To do
+
+Regan, so far the data is preprocessed. Next you will need to decide on your hypotheses and then write the analysis code. We will, of course, be able to help you with this. 
+
+There are also a number of decisions that you will need to make about the outlier extraction and cutoffs so far. I've used standard procedures so far but you will need to inspect the plots to do this. The decisons are as follows:
+
+1) How many trials must be correct on the dichotic listening for inclusion? 
+2) What cutoff should we use for RTs? We will need to exclude very short and long trials before applying our outlier identifier.
+3) How should we define lateralisation? Right now the script assumes an LI of above or below zero.
+4) What accuracy will we include? Right now it's at least 50% when performance across each visual field is averaged. 
