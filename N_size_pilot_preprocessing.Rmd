@@ -1,4 +1,4 @@
----
+Y---
 title: "Preprocessing of N size x laterality pilot data"
 output:
   html_document:
@@ -153,7 +153,7 @@ sum.file$hand2 <- ifelse(sum.file$index_EHI < 0, "Left", ifelse(sum.file$index_E
 hand.dif <- ifelse(sum.file$handedness == sum.file$hand2, 0, 1)
 ```
 
-Now we have processed this, we can see that there is `r sum(hand.dif)` participant(s) who reported being left-handed but actually showed an EHI score indicating left handedness. We code recode this participant's handedness using the variable *hand2*. We need to remember to remove the right-hander before analysis.
+Now we have processed this, we can see that there is `r sum(hand.dif)` participant(s) who reported being left-handed but actually showed an EHI score indicating right handedness. We code recode this participant's handedness using the variable *hand2*. We need to remember to remove the right-hander before analysis.
 
 # LexTALE
 
